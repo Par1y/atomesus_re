@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import random
 import string
 import time
@@ -7,7 +8,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, Security
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.background import BackgroundTask
 
@@ -17,6 +18,54 @@ router = APIRouter()
 security = HTTPBearer()
 
 ATOMESUS_BASE_URL = "https://api.atomesus.com"
+SESSION_DIR = "data"
+SESSION_FILE = os.path.join(SESSION_DIR, "session_map.json")
+SESSION_TTL = 6 * 60 * 60
+
+
+def _ensure_data_dir():
+    if not os.path.exists(SESSION_DIR):
+        os.makedirs(SESSION_DIR)
+
+
+def _load_sessions() -> dict:
+    _ensure_data_dir()
+    if not os.path.exists(SESSION_FILE):
+        return {}
+    try:
+        with open(SESSION_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _save_sessions(sessions: dict):
+    _ensure_data_dir()
+    with open(SESSION_FILE, "w", encoding="utf-8") as f:
+        json.dump(sessions, f, indent=2)
+
+
+def get_client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+    return request.client.host if request.client else "unknown"
+
+
+def get_or_create_session(request: Request) -> str:
+    client_ip = get_client_ip(request)
+    sessions = _load_sessions()
+    now = int(time.time())
+    entry = sessions.get(client_ip)
+    if entry and (now - entry.get("created_at", 0)) < SESSION_TTL:
+        return entry["session_id"]
+    new_session_id = f"chat_{uuid.uuid4().hex}"
+    sessions[client_ip] = {"session_id": new_session_id, "created_at": now}
+    _save_sessions(sessions)
+    return new_session_id
 
 
 def combine_messages(messages: list) -> str:
@@ -36,7 +85,6 @@ def combine_messages(messages: list) -> str:
 
 
 async def parse_atomesus_sse(response, stream: bool):
-    last_content = ""
     full_text = ""
     finish_reason = None
 
@@ -60,14 +108,12 @@ async def parse_atomesus_sse(response, stream: bool):
             content = data.get("content", "")
             if not isinstance(content, str):
                 content = str(content)
-            full_text = content
+            full_text += content
             if stream:
-                delta = content[len(last_content):]
-                last_content = content
-                if delta:
-                    yield {"type": "delta", "content": delta}
+                if content:
+                    yield {"type": "delta", "content": content}
             else:
-                yield {"type": "partial", "content": content}
+                yield {"type": "partial", "content": full_text}
 
         elif event_type == "end":
             reply = data.get("reply", "")
@@ -114,8 +160,7 @@ async def chat_completions(request: Request,
     stream = body.get("stream", False)
 
     message_text = combine_messages(messages)
-
-    request_id = str(uuid.uuid4())
+    session_id = get_or_create_session(request)
 
     headers = {
         "accept": "text/event-stream",
@@ -131,7 +176,7 @@ async def chat_completions(request: Request,
     parts = []
     parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"message\"\r\n\r\n{message_text}")
     parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"stream\"\r\n\r\n{str(stream).lower()}")
-    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"id\"\r\n\r\n{request_id}")
+    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"id\"\r\n\r\n{session_id}")
     parts.append(f"--{boundary}--\r\n")
     raw_body = "\r\n".join(parts).encode("utf-8")
 
@@ -167,6 +212,7 @@ async def chat_completions(request: Request,
             except Exception:
                 pass
             final_chunk = build_openai_chunk(model, content="", finish_reason="stop", chat_id=chat_id)
+            final_chunk["conversation_id"] = session_id
             yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
             yield "data: [DONE]\n\n"
 
@@ -188,6 +234,7 @@ async def chat_completions(request: Request,
         chat_id = f"chatcmpl-{''.join(random.choice(string.ascii_letters + string.digits) for _ in range(29))}"
         data = {
             "id": chat_id,
+            "conversation_id": session_id,
             "object": "chat.completion",
             "created": int(time.time()),
             "model": model,
