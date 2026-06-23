@@ -152,9 +152,10 @@ async def parse_atomesus_sse(response, stream: bool, debug: bool = False):
                 reply = data.get("reply", "")
                 payload = data.get("payload", {})
                 payload_data = payload.get("data", {}) if isinstance(payload, dict) else {}
+                image_url = payload_data.get("imageUrl", "")
                 mode = payload_data.get("mode", "")
-                if mode == "image":
-                    full_text = ""
+                if mode == "image" and image_url:
+                    full_text = f"\n![image]({image_url})\n"
                 elif reply:
                     full_text = reply
                 finish_reason = "stop"
