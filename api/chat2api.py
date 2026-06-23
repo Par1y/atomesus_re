@@ -250,12 +250,15 @@ async def chat_completions(request: Request,
 
     headers = {
         "accept": "text/event-stream",
-        "accept-language": request.headers.get("accept-language", "en-US,en;q=0.9"),
+        "accept-language": "zh-HK,zh-CN;q=0.9,zh;q=0.8,en-US;q=0.7,en;q=0.6",
         "content-type": "multipart/form-data; boundary=----WebKitFormBoundary0AR6ESGWHBQmUoAk",
         "origin": "https://www.atomesus.com",
         "referer": "https://www.atomesus.com/",
-        "user-agent": request.headers.get("user-agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+        "user-agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
         "authorization": f"Bearer {token}",
+        "sec-ch-ua": '"Safari";v="17.0", "Apple WebKit";v="605.1.15"',
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": '"iOS"',
     }
 
     boundary = "----WebKitFormBoundary0AR6ESGWHBQmUoAk"
