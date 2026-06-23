@@ -150,13 +150,18 @@ async def parse_atomesus_sse(response, stream: bool, debug: bool = False):
 
             elif event_type == "end":
                 reply = data.get("reply", "")
-                if reply:
+                payload = data.get("payload", {})
+                payload_data = payload.get("data", {}) if isinstance(payload, dict) else {}
+                mode = payload_data.get("mode", "")
+                if mode == "image":
+                    full_text = ""
+                elif reply:
                     full_text = reply
                 finish_reason = "stop"
                 yield {"type": "end", "content": full_text, "finish_reason": finish_reason}
                 break
             else:
-                if debug:
+                if debug and event_type not in ("status", "heartbeat"):
                     print(f"[DEBUG] raw_sse_unknown_type: {event_type} data={data_str[:300]}")
     except Exception as e:
         if debug:
@@ -267,6 +272,7 @@ async def chat_completions(request: Request,
     parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"stream\"\r\n\r\n{str(stream).lower()}")
     parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"sessionId\"\r\n\r\n{session_id}")
     parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"id\"\r\n\r\n{message_id}")
+    parts.append(f"--{boundary}\r\nContent-Disposition: form-data; name=\"selectedMode\"\r\n\r\nthinking")
     parts.append(f"--{boundary}--\r\n")
     raw_body = "\r\n".join(parts).encode("utf-8")
 
