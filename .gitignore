@@ -1,0 +1,12 @@
+data/
+*.pem
+*.key
+*.log
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+node_modules/
+.DS_Store
+data/*.tmp
